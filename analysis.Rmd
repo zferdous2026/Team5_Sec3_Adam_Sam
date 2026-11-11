@@ -1,0 +1,192 @@
+---
+title: "How Is AI Changing Jobs? Data Cleaning and Exploration"
+author: "Adem Khelifi and Sam"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 4)
+library(dplyr)
+library(ggplot2)
+```
+
+## 1. Load the data
+
+```{r}
+data <- read.csv("ai_job_impact.csv", check.names = FALSE)
+dim(data)      # rows and columns
+names(data)    # column names
+head(data)
+```
+
+## 2. Check the data
+
+```{r}
+str(data)                          # type of each column
+colSums(is.na(data))               # missing values
+sum(duplicated(data))              # duplicate rows
+sum(duplicated(data$Employee_ID))  # duplicate IDs
+```
+
+Check the labels in the main categories:
+
+```{r}
+table(data$Industry)
+table(data$AI_Adoption_Level)
+table(data$Job_Status)
+```
+
+Check that the numbers are in sensible ranges:
+
+```{r}
+summary(data$Age)
+summary(data$Salary_Before_AI)
+summary(data$Salary_After_AI)
+summary(data$Job_Satisfaction)
+```
+
+## 3. Clean the data
+
+1. Rename the column with `%` in its name.
+2. Put categories in a logical order (Low → Medium → High).
+3. Add new columns: salary change in dollars and percent, whether salary went up, and age group.
+
+```{r}
+data <- data %>%
+  rename(Productivity_Change_Pct = `Productivity_Change_%`) %>%
+  mutate(
+    AI_Adoption_Level = factor(AI_Adoption_Level, levels = c("Low", "Medium", "High")),
+    Automation_Risk   = factor(Automation_Risk,   levels = c("Low", "Medium", "High")),
+    Job_Status        = factor(Job_Status, levels = c("Unchanged", "Modified", "Replaced")),
+    Salary_Change     = Salary_After_AI - Salary_Before_AI,
+    Salary_Change_Pct = round(Salary_Change / Salary_Before_AI * 100, 2),
+    Salary_Went_Up    = ifelse(Salary_Change > 0, "Yes", "No"),
+    Age_Group         = cut(Age, breaks = c(17, 29, 39, 49, 59),
+                            labels = c("18-29", "30-39", "40-49", "50-59"))
+  )
+
+head(data)
+```
+
+## 4. Summary tables
+
+### Overall
+
+```{r}
+data %>%
+  summarise(
+    employees          = n(),
+    avg_salary_before  = mean(Salary_Before_AI),
+    avg_salary_after   = mean(Salary_After_AI),
+    avg_salary_change  = mean(Salary_Change_Pct),
+    pct_salary_went_up = mean(Salary_Went_Up == "Yes") * 100
+  )
+```
+
+### By AI adoption level
+
+```{r}
+data %>%
+  group_by(AI_Adoption_Level) %>%
+  summarise(
+    employees         = n(),
+    avg_salary_change = mean(Salary_Change_Pct),
+    avg_productivity  = mean(Productivity_Change_Pct),
+    avg_satisfaction  = mean(Job_Satisfaction)
+  )
+```
+
+### By industry
+
+```{r}
+data %>%
+  group_by(Industry) %>%
+  summarise(
+    employees         = n(),
+    avg_salary_before = mean(Salary_Before_AI),
+    avg_salary_change = mean(Salary_Change_Pct),
+    pct_modified_or_replaced = mean(Job_Status != "Unchanged") * 100
+  ) %>%
+  arrange(desc(pct_modified_or_replaced))
+```
+
+### Job status
+
+```{r}
+data %>%
+  count(Job_Status) %>%
+  mutate(percent = n / sum(n) * 100)
+```
+
+### Job roles with the highest and lowest salary change
+
+```{r}
+role_summary <- data %>%
+  group_by(Job_Role) %>%
+  summarise(avg_salary_change = mean(Salary_Change_Pct)) %>%
+  arrange(desc(avg_salary_change))
+
+head(role_summary, 5)   # top 5
+tail(role_summary, 5)   # bottom 5
+```
+
+## 5. Visuals
+
+### Salary change by AI adoption level
+
+```{r}
+ggplot(data, aes(x = AI_Adoption_Level, y = Salary_Change_Pct, fill = AI_Adoption_Level)) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(x = "AI adoption level", y = "Salary change (%)") +
+  theme_minimal()
+```
+
+### Job status by industry
+
+```{r}
+ggplot(data, aes(x = Industry, fill = Job_Status)) +
+  geom_bar(position = "fill") +
+  labs(x = NULL, y = "Share of employees", fill = "Job status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+### Productivity change by AI adoption level
+
+```{r}
+ggplot(data, aes(x = AI_Adoption_Level, y = Productivity_Change_Pct)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(x = "AI adoption level", y = "Productivity change (%)") +
+  theme_minimal()
+```
+
+### Distribution of salary change
+
+```{r}
+ggplot(data, aes(x = Salary_Change_Pct)) +
+  geom_histogram(binwidth = 2.5, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = "Salary change (%)", y = "Number of employees") +
+  theme_minimal()
+```
+
+### Salary before vs after AI
+
+```{r}
+ggplot(data, aes(x = Salary_Before_AI, y = Salary_After_AI, color = AI_Adoption_Level)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(x = "Salary before AI ($)", y = "Salary after AI ($)", color = "AI adoption") +
+  theme_minimal()
+```
+
+## 6. What we found
+
+- No missing values, duplicate rows, or duplicate IDs; all labels are consistent.
+- About 67% of employees earned more after AI; the average salary change was about +6%.
+- Salary change rises with AI adoption: about +2.5% (Low), +4.7% (Medium), +10.4% (High).
+- Productivity change is also higher with more AI: about 8% (Low) vs 11% (High).
+- IT has the most jobs modified or replaced (about 51%); Manufacturing the fewest (about 38%).
+- Doctors, Data Analysts, and Sales Associates had the biggest salary gains (about +8%); Supervisors the smallest (about +4%).
+- Job satisfaction is about the same (about 6 out of 9) across all groups.
